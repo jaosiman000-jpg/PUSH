@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <!--
+    viewport: width=device-width para responsividade mobile.
+    viewport-fit=cover: necessário no iPhone para ocupar a área toda (notch).
+  -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+  <!-- Título da aba do navegador -->
+  <title>Teste de Notificação de Venda</title>
+  <meta name="description" content="PWA para testar push notifications no iOS sem backend." />
+
+  <!-- ────────────────────────────────────────────────
+       Meta tags específicas para iOS:
+       - apple-mobile-web-app-capable: habilita modo "standalone" no Safari/iOS
+         (necessário para que push notifications funcionem no iPhone — iOS 16.4+)
+       - apple-mobile-web-app-status-bar-style: cor da barra de status
+       - apple-mobile-web-app-title: nome exibido na tela inicial
+  ─────────────────────────────────────────────────── -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Push Teste" />
+
+  <!-- Ícone para a tela inicial do iPhone (apple touch icon) -->
+  <link rel="apple-touch-icon" href="icon-192.png" />
+
+  <!-- Manifest do PWA — informa ao navegador que este é um Progressive Web App -->
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Cor da barra de endereço no Chrome Android -->
+  <meta name="theme-color" content="#6366f1" />
+
+  <!-- Nosso CSS -->
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <div class="container">
+
+    <!-- ── CABEÇALHO ── -->
+    <header>
+      <h1>🔔 Teste de Notificação de Venda</h1>
+      <p class="subtitle">PWA • iOS Push Notification Tester</p>
+    </header>
+
+    <!-- ══════════════════════════════════════════════
+         SEÇÃO 1 — PERMISSÃO DE NOTIFICAÇÕES
+         Mostra o status atual e o botão para pedir permissão
+    ══════════════════════════════════════════════════ -->
+    <section class="card" aria-labelledby="sec-perm-title">
+      <h2 id="sec-perm-title">Permissão de Notificação</h2>
+
+      <!-- Badge de status: "pendente" / "concedida" / "negada" -->
+      <div class="permission-row">
+        <span class="permission-label">Status atual:</span>
+        <span id="permission-badge">verificando…</span>
+      </div>
+
+      <!--
+        Botão que chama Notification.requestPermission() e
+        depois tenta criar uma PushSubscription via pushManager.subscribe().
+        No iOS 16.4+, isto só funciona quando o PWA está instalado na Home Screen.
+      -->
+      <button
+        id="btn-activate"
+        class="btn-primary btn-full"
+        onclick="activateNotifications()"
+        aria-label="Ativar notificações push"
+      >
+        🔔 Ativar Notificações
+      </button>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         SEÇÃO 2 — DISPARAR NOTIFICAÇÃO LOCAL
+         Campos de entrada + botão de disparo
+    ══════════════════════════════════════════════════ -->
+    <section class="card" aria-labelledby="sec-notify-title">
+      <h2 id="sec-notify-title">Disparar Notificação Local</h2>
+
+      <!-- Campo: Valor da venda -->
+      <div class="field">
+        <label for="input-valor">Valor da venda (R$)</label>
+        <input
+          id="input-valor"
+          type="number"
+          min="0"
+          step="0.01"
+          placeholder="Ex: 1250.00"
+          inputmode="decimal"
+          aria-label="Valor da venda em reais"
+        />
+      </div>
+
+      <!-- Campo: Nome do produto (opcional) -->
+      <div class="field">
+        <label for="input-produto">Nome do produto <span style="font-weight:400">(opcional)</span></label>
+        <input
+          id="input-produto"
+          type="text"
+          placeholder="Ex: Curso de Marketing Digital"
+          maxlength="80"
+          aria-label="Nome do produto"
+        />
+      </div>
+
+      <!--
+        Botão que coleta os valores dos campos acima e envia uma mensagem
+        para o Service Worker via postMessage, que por sua vez chama
+        registration.showNotification() — tudo localmente, sem servidor.
+      -->
+      <button
+        id="btn-disparar"
+        class="btn-success btn-full"
+        onclick="dispararNotificacao()"
+        disabled
+        aria-label="Disparar notificação de venda"
+      >
+        🚀 Disparar Notificação
+      </button>
+    </section>
+
+    <!-- ══════════════════════════════════════════════
+         SEÇÃO 3 — CONSOLE DE LOG / DEBUG
+         Área de saída em tempo real para acompanhar cada etapa
+    ══════════════════════════════════════════════════ -->
+    <section class="card" aria-labelledby="sec-log-title">
+      <h2 id="sec-log-title">Console de Debug</h2>
+
+      <!--
+        #log-area recebe entradas de texto via JavaScript.
+        Cada linha mostra timestamp + mensagem com cor de acordo com o tipo:
+        info (azul), ok (verde), warn (amarelo), err (vermelho).
+      -->
+      <div
+        id="log-area"
+        class="log-area"
+        role="log"
+        aria-live="polite"
+        aria-label="Console de log do PWA"
+      >
+        <p class="log-empty" id="log-empty">Aguardando ações…</p>
+      </div>
+    </section>
+
+    <!-- ── RODAPÉ ── -->
+    <footer>
+      <p>Requer HTTPS ou localhost &nbsp;•&nbsp; iOS 16.4+ &nbsp;•&nbsp; Instale na Home Screen</p>
+    </footer>
+
+  </div><!-- /container -->
+
+  <!-- Nosso script principal -->
+  <script src="app.js"></script>
+
+</body>
+</html>
