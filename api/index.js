@@ -122,7 +122,7 @@ app.post('/enviar', async (req, res) => {
   // Garante que estamos com a lista mais recente do arquivo
   carregarSubscriptions();
 
-  const { title, body, valor, produto } = req.body;
+  const { title, body, valor, produto, subscription } = req.body;
 
   let notificationTitle = title;
   let notificationBody = body;
@@ -140,7 +140,17 @@ app.post('/enviar', async (req, res) => {
   notificationTitle = notificationTitle || 'Venda Aprovada!';
   notificationBody = notificationBody || 'Valor: R$ 0,00';
 
-  console.log(`\n[Notificação] Iniciando disparo para ${subscriptions.length} assinatura(s)...`);
+  // Determina os alvos do disparo:
+  // Se a requisição enviou a assinatura diretamente, mandamos apenas para ela (ideal para Serverless/Vercel)
+  // Caso contrário, enviamos para todas as assinaturas armazenadas no arquivo
+  let alvos = [];
+  if (subscription && subscription.endpoint) {
+    alvos.push(subscription);
+  } else {
+    alvos = [...subscriptions];
+  }
+
+  console.log(`\n[Notificação] Iniciando disparo para ${alvos.length} assinatura(s)...`);
   console.log(`[Notificação] Título: "${notificationTitle}" | Corpo: "${notificationBody}"`);
 
   const payload = JSON.stringify({
@@ -154,7 +164,7 @@ app.post('/enviar', async (req, res) => {
   let falhas = 0;
   let assinaturasExpiradas = [];
 
-  const promessasDeEnvio = subscriptions.map(async (sub) => {
+  const promessasDeEnvio = alvos.map(async (sub) => {
     try {
       await webpush.sendNotification(sub, payload);
       sucessos++;
@@ -171,7 +181,8 @@ app.post('/enviar', async (req, res) => {
 
   await Promise.all(promessasDeEnvio);
 
-  if (assinaturasExpiradas.length > 0) {
+  // Só removemos do banco de dados persistente se o disparo foi feito a partir dele
+  if (assinaturasExpiradas.length > 0 && !subscription) {
     console.log(`[Limpeza] Removendo ${assinaturasExpiradas.length} assinaturas inativas da lista...`);
     subscriptions = subscriptions.filter(sub => !assinaturasExpiradas.includes(sub.endpoint));
     salvarSubscriptions();
@@ -181,10 +192,10 @@ app.post('/enviar', async (req, res) => {
 
   res.status(200).json({
     mensagem: 'Notificação enviada!',
-    total: subscriptions.length + assinaturasExpiradas.length,
+    total: alvos.length,
     enviados: sucessos,
     falhas: falhas,
-    removidas: assinaturasExpiradas.length
+    removidas: subscription ? 0 : assinaturasExpiradas.length
   });
 });
 

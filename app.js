@@ -203,7 +203,14 @@ async function dispararNotificacao() {
   log(`Enviando solicitação de disparo para o servidor...`, 'info');
 
   try {
-    // Faz a chamada POST /enviar enviando o título selecionado e o valor formatado
+    // Obtém a assinatura atual do navegador para enviar diretamente no corpo da requisição
+    // Isso garante o funcionamento instantâneo em ambientes serverless (Vercel)
+    let subscription = null;
+    if (swRegistration) {
+      subscription = await swRegistration.pushManager.getSubscription();
+    }
+
+    // Faz a chamada POST /enviar enviando o título, corpo e a assinatura do dispositivo
     const resposta = await fetch('/enviar', {
       method: 'POST',
       headers: {
@@ -211,7 +218,8 @@ async function dispararNotificacao() {
       },
       body: JSON.stringify({
         title: titulo,
-        body: corpoFormatado
+        body: corpoFormatado,
+        subscription: subscription
       })
     });
 
