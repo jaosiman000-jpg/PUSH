@@ -1,50 +1,44 @@
 // ============================================================
-// app.js — Lógica principal do PWA de Teste de Push
+// app.js — Lógica do PWA frontend de Teste de Push
 //
-// ⚠️  IMPORTANTE: Este app só funciona corretamente em:
-//   • https://  (produção / ngrok / Cloudflare Tunnel)
-//   • http://localhost ou http://127.0.0.1 (desenvolvimento local)
-//
-//   No iPhone, push notifications só funcionam se o PWA
-//   estiver instalado na tela inicial (iOS 16.4+).
+// ⚠️ ATENÇÃO: Cole sua chave pública VAPID no campo abaixo!
+// Ela é gerada usando o comando: npx web-push generate-vapid-keys
 // ============================================================
 
+const VAPID_PUBLIC_KEY = "BP2lyZ4hhFMOjKswzj_PyfHeA-B1iU9BFbO8T7TaJDoaGKryWGsS17DbCceW4EFO9PbLVHKsSQ_B7e8e3OFuM6M"; 
+
 // ──────────────────────────────────────────────────────────
-// 1. REFERÊNCIAS DE ELEMENTOS DO DOM
+// 1. REFERÊNCIAS DOS ELEMENTOS DA TELA
 // ──────────────────────────────────────────────────────────
 const permissionBadge  = document.getElementById('permission-badge');
 const btnActivate      = document.getElementById('btn-activate');
 const btnDisparar      = document.getElementById('btn-disparar');
 const inputValor       = document.getElementById('input-valor');
-const inputProduto     = document.getElementById('input-produto');
+const selectTitulo     = document.getElementById('select-titulo');
 const logArea          = document.getElementById('log-area');
 const logEmpty         = document.getElementById('log-empty');
 
+// Referência global ao Service Worker
+let swRegistration = null;
+
 // ──────────────────────────────────────────────────────────
-// 2. UTILITÁRIO: CONSOLE DE LOG NA TELA
-//    Cada chamada a log() adiciona uma linha ao #log-area.
+// 2. SISTEMA DE LOG EM TELA (Debug amigável)
 //    type: 'info' | 'ok' | 'warn' | 'err'
 // ──────────────────────────────────────────────────────────
 function log(mensagem, type = 'info') {
-  // Remove o placeholder "Aguardando ações…" na primeira mensagem
   if (logEmpty) logEmpty.remove();
 
-  // Formata o timestamp no padrão HH:MM:SS
   const agora = new Date();
   const ts = agora.toLocaleTimeString('pt-BR', { hour12: false });
 
-  // Cria uma linha de log
   const entry = document.createElement('div');
   entry.className = `log-entry ${type}`;
   entry.innerHTML = `<span class="ts">[${ts}]</span>${escaparHTML(mensagem)}`;
 
   logArea.appendChild(entry);
-
-  // Auto-scroll para a última mensagem
-  logArea.scrollTop = logArea.scrollHeight;
+  logArea.scrollTop = logArea.scrollHeight; // auto-scroll
 }
 
-// Escapa caracteres HTML para evitar XSS no log
 function escaparHTML(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -53,242 +47,209 @@ function escaparHTML(str) {
 }
 
 // ──────────────────────────────────────────────────────────
-// 3. VARIÁVEL GLOBAL: REFERÊNCIA AO SERVICE WORKER REGISTRADO
-//    Será usada para enviar mensagens ao SW via postMessage().
-// ──────────────────────────────────────────────────────────
-let swRegistration = null;
-
-// ──────────────────────────────────────────────────────────
-// 4. INICIALIZAÇÃO: REGISTRA O SERVICE WORKER AO CARREGAR A PÁGINA
+// 3. REGISTRO AUTOMÁTICO DO SERVICE WORKER (Ao carregar)
 // ──────────────────────────────────────────────────────────
 window.addEventListener('load', async () => {
-
-  // Verifica se o navegador suporta Service Workers
   if (!('serviceWorker' in navigator)) {
     log('Service Workers não são suportados neste navegador.', 'err');
     return;
   }
 
   try {
-    // Registra o sw.js como service worker deste PWA
+    // Registra o sw.js
     swRegistration = await navigator.serviceWorker.register('/sw.js');
-    log('Service worker registrado ✓', 'ok');
+    log('Service Worker registrado ✓', 'ok');
 
-    // Aguarda o SW estar ativo antes de continuar
+    // Aguarda o Service Worker estar pronto e ativo
     await navigator.serviceWorker.ready;
-    log('Service worker ativo e pronto.', 'ok');
+    log('Service Worker pronto para gerenciar push.', 'ok');
 
   } catch (erro) {
-    log(`Erro ao registrar service worker: ${erro.message}`, 'err');
+    log(`Erro no Service Worker: ${erro.message}`, 'err');
   }
 
-  // Exibe o status atual da permissão de notificação
+  // Verifica e exibe o estado de permissão inicial
   atualizarStatusPermissao();
 });
 
 // ──────────────────────────────────────────────────────────
-// 5. STATUS DE PERMISSÃO
-//    Lê Notification.permission e atualiza o badge na tela.
-//    Valores possíveis: "default" (pendente), "granted", "denied"
+// 4. ATUALIZAR INTERFACE COM O STATUS DA PERMISSÃO
 // ──────────────────────────────────────────────────────────
 function atualizarStatusPermissao() {
   if (!('Notification' in window)) {
     permissionBadge.textContent = 'não suportado';
-    log('API de Notification não disponível neste navegador.', 'warn');
     return;
   }
 
   const status = Notification.permission;
 
-  // Mapeia o valor da API para textos em português e classes CSS
-  const mapa = {
+  const statusMap = {
     'default':  { texto: 'pendente',  classe: 'pending' },
     'granted':  { texto: 'concedida', classe: 'granted' },
     'denied':   { texto: 'negada',    classe: 'denied'  },
   };
 
-  const info = mapa[status] ?? { texto: status, classe: '' };
-
+  const info = statusMap[status] || { texto: status, classe: '' };
   permissionBadge.textContent = info.texto;
   permissionBadge.className   = info.classe;
 
-  // Habilita ou desabilita o botão de disparar com base na permissão
+  // Habilita o botão de enviar se a permissão já foi concedida
   btnDisparar.disabled = (status !== 'granted');
-
-  if (status === 'denied') {
-    log('Permissão negada. Acesse as configurações do navegador para ativar.', 'warn');
-  }
 }
 
 // ──────────────────────────────────────────────────────────
-// 6. SOLICITAR PERMISSÃO + CRIAR PUSH SUBSCRIPTION
-//    Chamado pelo botão "Ativar Notificações".
+// 5. ATIVAR NOTIFICAÇÕES (Solicitar permissão e assinar Push)
 // ──────────────────────────────────────────────────────────
 async function activateNotifications() {
   btnActivate.disabled = true;
 
-  // ── 6a. Verificações de suporte ──────────────────────────
+  // Verifica se a chave VAPID foi configurada
+  if (VAPID_PUBLIC_KEY === "COLE_AQUI" || VAPID_PUBLIC_KEY.trim() === "") {
+    log('ERRO: Você precisa colar sua chave pública VAPID na constante VAPID_PUBLIC_KEY no topo de app.js!', 'err');
+    btnActivate.disabled = false;
+    return;
+  }
+
   if (!('Notification' in window)) {
-    log('Notificações não suportadas neste navegador.', 'err');
+    log('A API de Notificações não é suportada por este dispositivo.', 'err');
     btnActivate.disabled = false;
     return;
   }
 
   if (!swRegistration) {
-    log('Service worker ainda não está pronto. Tente novamente.', 'warn');
+    log('Service Worker não carregado ainda. Tente de novo em segundos.', 'warn');
     btnActivate.disabled = false;
     return;
   }
 
-  // ── 6b. Solicita permissão ao usuário ────────────────────
-  log('Solicitando permissão de notificação…');
-  let permissao;
+  log('Solicitando permissão ao usuário...');
 
   try {
-    // requestPermission() pode retornar uma Promise (moderno)
-    // ou usar callback (legado). Tratamos os dois casos.
-    permissao = await Notification.requestPermission();
-  } catch (erro) {
-    log(`Erro ao solicitar permissão: ${erro.message}`, 'err');
-    btnActivate.disabled = false;
-    return;
-  }
+    // Pede permissão de exibição
+    const permissao = await Notification.requestPermission();
+    atualizarStatusPermissao();
 
-  atualizarStatusPermissao();
-
-  if (permissao !== 'granted') {
-    log(`Permissão ${permissao === 'denied' ? 'negada' : 'não concedida'}.`, 'warn');
-    btnActivate.disabled = false;
-    return;
-  }
-
-  log('Permissão concedida ✓', 'ok');
-
-  // ── 6c. Cria a PushSubscription ──────────────────────────
-  //
-  // ╔══════════════════════════════════════════════════════╗
-  // ║  INTEGRAÇÃO FUTURA COM BACKEND (VAPID / web-push)   ║
-  // ║                                                      ║
-  // ║  Para usar push real (via servidor), você precisará: ║
-  // ║  1. Gerar um par de chaves VAPID no servidor:        ║
-  // ║     const webpush = require('web-push');             ║
-  // ║     const keys = webpush.generateVAPIDKeys();        ║
-  // ║                                                      ║
-  // ║  2. Substituir a string abaixo pela chave pública:   ║
-  // ║     applicationServerKey: urlBase64ToUint8Array(     ║
-  // ║       'SUA_VAPID_PUBLIC_KEY_AQUI'                    ║
-  // ║     )                                                ║
-  // ║                                                      ║
-  // ║  3. Enviar o objeto `subscription` para o backend    ║
-  // ║     para que ele possa chamar webpush.sendNotification║
-  // ╚══════════════════════════════════════════════════════╝
-  //
-  // Por enquanto, tentamos criar a subscription mesmo sem
-  // chave VAPID — funciona em alguns ambientes de teste,
-  // mas pode falhar dependendo do navegador/versão do iOS.
-
-  if ('PushManager' in window) {
-    try {
-      // Verifica se já existe uma subscription ativa
-      let subscription = await swRegistration.pushManager.getSubscription();
-
-      if (!subscription) {
-        // Cria uma nova subscription.
-        // Sem applicationServerKey => modo "sem VAPID" (limitado, para testes)
-        // Quando adicionar o backend, substitua o bloco abaixo:
-        subscription = await swRegistration.pushManager.subscribe({
-          userVisibleOnly: true,
-          // applicationServerKey: urlBase64ToUint8Array('SUA_CHAVE_VAPID_PUBLICA'),
-        });
-      }
-
-      log('Subscription criada ✓', 'ok');
-      log(`Endpoint: ${subscription.endpoint.slice(0, 60)}…`);
-
-      // Exibe o objeto de subscription no console do browser (para debug)
-      console.log('[Push Teste] PushSubscription:', JSON.stringify(subscription));
-
-    } catch (erro) {
-      // Em testes locais sem VAPID isso pode falhar — é esperado.
-      // A notificação LOCAL ainda funcionará via postMessage (passo 7).
-      log(`PushManager.subscribe falhou (esperado sem VAPID): ${erro.message}`, 'warn');
-      log('Notificações locais ainda funcionarão normalmente.', 'info');
+    if (permissao !== 'granted') {
+      log(`Permissão não concedida. Status: ${permissao}`, 'warn');
+      btnActivate.disabled = false;
+      return;
     }
-  } else {
-    log('PushManager não disponível — notificações locais apenas.', 'warn');
+
+    log('Permissão concedida pelo usuário! ✓', 'ok');
+
+    // Assina o serviço de push no navegador
+    log('Gerando credencial (PushSubscription)...');
+    
+    // Converte a chave pública de string Base64 para Uint8Array
+    const applicationServerKey = urlBase64ToUint8Array(VAPID_PUBLIC_KEY);
+
+    // Registra a assinatura com a chave pública do nosso servidor
+    const subscription = await swRegistration.pushManager.subscribe({
+      userVisibleOnly: true, // Obrigatório por motivos de segurança e privacidade do usuário
+      applicationServerKey: applicationServerKey
+    });
+
+    log('Subscription gerada no navegador ✓', 'ok');
+
+    // Envia o objeto da assinatura para o nosso backend Node
+    log('Enviando subscription para o backend...');
+    
+    const resposta = await fetch('/subscribe', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(subscription)
+    });
+
+    if (!resposta.ok) {
+      throw new Error(`Erro HTTP no servidor: ${resposta.status}`);
+    }
+
+    log('Subscription salva no backend com sucesso! 🎉', 'ok');
+
+  } catch (erro) {
+    log(`Falha ao registrar push: ${erro.message}`, 'err');
+    console.error(erro);
   }
 
   btnActivate.disabled = false;
 }
 
 // ──────────────────────────────────────────────────────────
-// 7. DISPARAR NOTIFICAÇÃO LOCAL (via Service Worker)
-//    Chamado pelo botão "Disparar Notificação".
-//
-//    Enviamos uma mensagem para o SW via postMessage().
-//    O SW escuta esse evento e chama self.registration.showNotification().
-//    Isso simula o comportamento de uma notificação real,
-//    sem precisar de servidor backend.
+// 6. DISPARAR NOTIFICAÇÃO (Aciona o backend)
 // ──────────────────────────────────────────────────────────
 async function dispararNotificacao() {
-  // ── 7a. Validações ───────────────────────────────────────
-  if (!swRegistration) {
-    log('Service worker não disponível.', 'err');
-    return;
-  }
-
-  const valorRaw  = parseFloat(inputValor.value);
-  const produto   = inputProduto.value.trim() || 'Produto sem nome';
+  // Corrige o bug do iPhone: aceita vírgula e ponto como separadores decimais
+  const valorTexto = inputValor.value.replace(/\s/g, '').replace(',', '.');
+  const valorRaw   = parseFloat(valorTexto);
+  const titulo   = selectTitulo.value;
 
   if (isNaN(valorRaw) || valorRaw < 0) {
-    log('Digite um valor de venda válido.', 'warn');
+    log('Por favor, informe um valor válido.', 'warn');
     inputValor.focus();
     return;
   }
 
-  // ── 7b. Formata o valor no padrão brasileiro ─────────────
-  // Ex: 1250 → "1.250,00"
+  // Formata o valor no padrão BRL (ex: 175,81)
   const valorFormatado = valorRaw.toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+    maximumFractionDigits: 2
   });
 
-  // ── 7c. Monta o payload da notificação ───────────────────
-  const payload = {
-    tipo:    'MOSTRAR_NOTIFICACAO',   // tipo de mensagem para o SW
-    titulo:  'Você recebeu uma venda! 🎉',
-    corpo:   `Produto: ${produto} — Valor: R$ ${valorFormatado}`,
-    icone:   '/icon-192.png',
-  };
+  const corpoFormatado = `Valor: R$ ${valorFormatado}`;
 
-  // ── 7d. Envia mensagem para o SW ─────────────────────────
+  btnDisparar.disabled = true;
+  log(`Enviando solicitação de disparo para o servidor...`, 'info');
+
   try {
-    // Obtém a instância ativa do service worker
-    const swAtivo = swRegistration.active;
+    // Faz a chamada POST /enviar enviando o título selecionado e o valor formatado
+    const resposta = await fetch('/enviar', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        title: titulo,
+        body: corpoFormatado
+      })
+    });
 
-    if (!swAtivo) {
-      log('Service worker ativo não encontrado. Recarregue a página.', 'err');
-      return;
+    if (!resposta.ok) {
+      throw new Error(`Erro ao enviar comando: Código ${resposta.status}`);
     }
 
-    swAtivo.postMessage(payload);
-    log(`Notificação enviada → "${produto}" | R$ ${valorFormatado}`, 'ok');
+    const resultado = await resposta.json();
+    log(`Servidor respondeu: Notificações enviadas para ${resultado.enviados} dispositivo(s).`, 'ok');
 
   } catch (erro) {
-    log(`Erro ao enviar notificação: ${erro.message}`, 'err');
+    log(`Erro no disparo: ${erro.message}`, 'err');
   }
+
+  btnDisparar.disabled = false;
 }
 
 // ──────────────────────────────────────────────────────────
-// 8. HELPER: CONVERTE CHAVE VAPID DE BASE64 PARA Uint8Array
-//    Necessário ao chamar pushManager.subscribe() com VAPID.
+// 7. HELPER: CONVERTE A CHAVE VAPID DE BASE64 PARA UINT8ARRAY
 //
-//    USO FUTURO — descomentar quando adicionar o backend:
-//    applicationServerKey: urlBase64ToUint8Array('SUA_CHAVE_AQUI')
+// 🤔 POR QUE ISSO É NECESSÁRIO?
+// A API de Push do navegador (`pushManager.subscribe`) espera a chave
+// pública do servidor em formato binário (Buffer/Array de bytes).
+// Como representamos a chave VAPID como uma string Base64Url amigável
+// no código, esta função decodifica e formata a string para o
+// formato nativo necessário.
 // ──────────────────────────────────────────────────────────
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
-  const base64  = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
-  const rawData = atob(base64);
-  return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+  const base64 = (base64String + padding)
+    .replace(/\-/g, '+')
+    .replace(/_/g, '/');
+
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
 }

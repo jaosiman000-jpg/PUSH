@@ -1,193 +1,118 @@
 // ============================================================
 // sw.js — Service Worker do PWA de Teste de Push
 //
-// O Service Worker é um script que roda em segundo plano,
-// separado da aba do navegador. Ele pode:
-//   • Interceptar requisições de rede (cache)
-//   • Receber push notifications do servidor
-//   • Mostrar notificações mesmo com a aba fechada
-//
-// CICLO DE VIDA:
-//   install  → SW baixado e instalado
-//   activate → SW entra em controle das páginas
-//   fetch    → SW intercepta requisições (não usado aqui)
-//   push     → SW recebe evento push do servidor
-//   message  → SW recebe mensagens da página via postMessage
+// O Service Worker roda em segundo plano e lida com eventos do sistema
+// mesmo com o app fechado ou aba minimizada.
 // ============================================================
 
-// ──────────────────────────────────────────────────────────
-// 1. EVENTO: install
-//    Disparado quando o SW é instalado pela primeira vez
-//    (ou quando o arquivo sw.js muda e ele é atualizado).
-//
-//    self.skipWaiting() faz o SW pular a fase de "espera"
-//    e entrar em ativação imediatamente — útil durante testes.
-// ──────────────────────────────────────────────────────────
-self.addEventListener('install', (evento) => {
-  console.log('[SW] Instalando service worker…');
-
-  evento.waitUntil(
-    // ╔══════════════════════════════════════════════════╗
-    // ║  INTEGRAÇÃO FUTURA — CACHE DE ARQUIVOS          ║
-    // ║  Para cache offline, você usaria algo assim:    ║
-    // ║  caches.open('push-teste-v1').then(cache => {   ║
-    // ║    return cache.addAll(['/','index.html',...]);  ║
-    // ║  })                                             ║
-    // ╚══════════════════════════════════════════════════╝
-    self.skipWaiting()   // pula a fase de espera imediatamente
-  );
+// 1. EVENTO: install — Disparado na instalação do Service Worker
+self.addEventListener('install', (event) => {
+  console.log('[Service Worker] Instalando...');
+  // Força o Service Worker recém-instalado a se tornar ativo imediatamente
+  self.skipWaiting();
 });
 
-// ──────────────────────────────────────────────────────────
-// 2. EVENTO: activate
-//    Disparado quando o SW assume o controle da página.
-//    clients.claim() faz com que o SW controle imediatamente
-//    todas as abas abertas — sem precisar recarregar.
-// ──────────────────────────────────────────────────────────
-self.addEventListener('activate', (evento) => {
-  console.log('[SW] Service worker ativado.');
-
-  evento.waitUntil(
-    // ╔══════════════════════════════════════════════════╗
-    // ║  INTEGRAÇÃO FUTURA — LIMPEZA DE CACHES ANTIGOS  ║
-    // ║  caches.keys().then(keys => {                   ║
-    // ║    return Promise.all(                          ║
-    // ║      keys.filter(k => k !== 'push-teste-v1')   ║
-    // ║          .map(k => caches.delete(k))            ║
-    // ║    );                                           ║
-    // ║  })                                             ║
-    // ╚══════════════════════════════════════════════════╝
-    self.clients.claim()   // assume controle imediato de todas as abas
-  );
+// 2. EVENTO: activate — Disparado na ativação do Service Worker
+self.addEventListener('activate', (event) => {
+  console.log('[Service Worker] Ativado.');
+  // Garante que o Service Worker controle imediatamente a aba ativa do PWA
+  event.waitUntil(self.clients.claim());
 });
 
-// ──────────────────────────────────────────────────────────
-// 3. EVENTO: message
-//    Recebe mensagens enviadas pela página via postMessage().
-//    É assim que disparamos notificações LOCALMENTE
-//    (sem precisar de servidor) para testar no iOS.
-//
-//    O app.js envia: { tipo: 'MOSTRAR_NOTIFICACAO', ... }
-// ──────────────────────────────────────────────────────────
-self.addEventListener('message', (evento) => {
-  const dados = evento.data;
+// 3. EVENTO: push — Disparado ao receber notificações Push reais do servidor
+// O navegador do usuário (Safari no iOS) acorda o Service Worker para
+// processar a notificação que veio da rede APNs / FCM.
+self.addEventListener('push', (event) => {
+  console.log('[Service Worker] Evento Push recebido do servidor.');
 
-  // Ignora mensagens sem o tipo esperado
-  if (!dados || dados.tipo !== 'MOSTRAR_NOTIFICACAO') return;
-
-  console.log('[SW] Mensagem recebida:', dados);
-
-  // Monta as opções da notificação
-  const opcoes = {
-    body:  dados.corpo,           // texto do corpo
-    icon:  dados.icone,           // ícone do PWA
-    badge: dados.icone,           // ícone pequeno (Android)
-    tag:   'venda-local',         // agrupa notificações do mesmo tipo
-    renotify: true,               // vibra mesmo se já existir uma com mesmo tag
-    requireInteraction: false,    // iOS ignora, mas bom definir
-
-    // ╔══════════════════════════════════════════════════╗
-    // ║  INTEGRAÇÃO FUTURA — DADOS PARA notificationclick║
-    // ║  Passe dados adicionais no campo `data`:        ║
-    // ║  data: { url: '/', pedidoId: dados.pedidoId }  ║
-    // ╚══════════════════════════════════════════════════╝
-    data: { url: '/' },
-  };
-
-  // Mostra a notificação via Service Worker
-  evento.waitUntil(
-    self.registration.showNotification(dados.titulo, opcoes)
-  );
-});
-
-// ──────────────────────────────────────────────────────────
-// 4. EVENTO: push
-//    Disparado quando o servidor envia um push real via VAPID.
-//    Está preparado para receber um JSON com título e corpo.
-//
-//    ╔══════════════════════════════════════════════════════╗
-//    ║  INTEGRAÇÃO FUTURA — BACKEND VAPID / web-push       ║
-//    ║                                                      ║
-//    ║  No backend (Node.js com lib 'web-push'), você      ║
-//    ║  enviaria algo como:                                 ║
-//    ║                                                      ║
-//    ║  webpush.sendNotification(subscription, JSON.stringify({
-//    ║    titulo: 'Você recebeu uma venda! 🎉',            ║
-//    ║    corpo:  'Produto: X — Valor: R$ 1.250,00',       ║
-//    ║    icone:  '/icon-192.png',                         ║
-//    ║  }));                                               ║
-//    ║                                                      ║
-//    ║  E o SW aqui leria esse payload com evento.data.json()║
-//    ╚══════════════════════════════════════════════════════╝
-// ──────────────────────────────────────────────────────────
-self.addEventListener('push', (evento) => {
-  console.log('[SW] Evento push recebido do servidor.');
-
-  // Valores padrão caso o payload venha vazio ou mal-formado
-  let titulo = 'Você recebeu uma venda! 🎉';
-  let opcoes = {
-    body:  'Nova venda registrada.',
-    icon:  '/icon-192.png',
+  // Configurações padrão caso o payload não venha ou falhe
+  let title = 'Você recebeu uma venda! 🎉';
+  let options = {
+    body: 'Produto vendido.',
+    icon: '/icon-192.png',
     badge: '/icon-192.png',
-    tag:   'venda-push',
-    data:  { url: '/' },
+    tag: 'venda-real', // Tag para agrupar notificações semelhantes
+    data: { url: '/' } // URL padrão a ser aberta no clique
   };
 
-  // Tenta ler o payload JSON enviado pelo servidor
-  if (evento.data) {
+  // Se houver dados no evento push do servidor, nós os lemos
+  if (event.data) {
     try {
-      const payload = evento.data.json();
+      // Lê o payload JSON enviado pelo servidor do backend
+      const payload = event.data.json();
+      console.log('[Service Worker] Payload descriptografado com sucesso:', payload);
 
-      // O backend pode enviar qualquer estrutura JSON.
-      // Adaptamos para o formato esperado:
-      titulo         = payload.titulo ?? titulo;
-      opcoes.body    = payload.corpo  ?? opcoes.body;
-      opcoes.icon    = payload.icone  ?? opcoes.icon;
-      opcoes.data    = { url: payload.url ?? '/' };
-
-    } catch (erro) {
-      // Se o payload não for JSON válido, usa o texto puro
-      opcoes.body = evento.data.text();
-      console.warn('[SW] Payload push não é JSON válido:', erro.message);
+      // Atualiza o título e as opções com os dados do servidor
+      title = payload.title || title;
+      options.body = payload.body || options.body;
+      options.icon = payload.icon || options.icon;
+      options.badge = payload.icon || options.badge;
+      
+      // Armazena a URL enviada pelo servidor para abrirmos no clique
+      if (payload.url) {
+        options.data.url = payload.url;
+      }
+    } catch (err) {
+      console.error('[Service Worker] Erro ao analisar payload JSON do push:', err);
+      // Se não for JSON válido (ex: texto puro), usa o conteúdo bruto como corpo
+      options.body = event.data.text();
     }
   }
 
-  evento.waitUntil(
-    self.registration.showNotification(titulo, opcoes)
+  // Exibe a notificação no sistema operacional do dispositivo (iOS / macOS / Android / etc.)
+  // O event.waitUntil() garante que o Service Worker não seja encerrado
+  // antes que a notificação termine de ser exibida pelo sistema.
+  event.waitUntil(
+    self.registration.showNotification(title, options)
   );
 });
 
-// ──────────────────────────────────────────────────────────
-// 5. EVENTO: notificationclick
-//    Disparado quando o usuário toca/clica em uma notificação.
-//    Aqui focamos a aba já aberta do app, ou abrimos uma nova.
-// ──────────────────────────────────────────────────────────
-self.addEventListener('notificationclick', (evento) => {
-  console.log('[SW] Notificação clicada.');
+// 4. EVENTO: notificationclick — Disparado quando o usuário clica na notificação
+self.addEventListener('notificationclick', (event) => {
+  console.log('[Service Worker] Notificação clicada.');
 
-  // Fecha o balão da notificação
-  evento.notification.close();
+  // Fecha o balão visual da notificação
+  event.notification.close();
 
-  // URL para abrir/focar (vem do campo `data` definido acima)
-  const urlAlvo = (evento.notification.data && evento.notification.data.url)
-    ? evento.notification.data.url
+  // Determina qual URL abrir (vem das informações em `data` no push)
+  const urlToOpen = (event.notification.data && event.notification.data.url)
+    ? event.notification.data.url
     : '/';
 
-  evento.waitUntil(
-    // Procura por uma aba já aberta que pertença a este PWA
+  // Gerenciamento de janelas: tenta focar se o app já estiver aberto ou abre nova aba
+  event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true })
-      .then((listaDeAbas) => {
-        // Se já existe uma aba aberta, foca nela
-        for (const aba of listaDeAbas) {
-          if (aba.url.includes(self.location.origin) && 'focus' in aba) {
-            return aba.focus();
+      .then((windowClients) => {
+        // Verifica se há alguma aba já aberta no mesmo domínio
+        for (const client of windowClients) {
+          if (client.url.includes(self.location.origin) && 'focus' in client) {
+            // Foca na aba existente
+            return client.focus();
           }
         }
-
-        // Se não há aba aberta, abre uma nova
+        // Se não houver abas abertas, abre uma nova
         if (self.clients.openWindow) {
-          return self.clients.openWindow(urlAlvo);
+          return self.clients.openWindow(urlToOpen);
         }
       })
   );
+});
+
+// 5. EVENTO: message — Permite enviar notificações locais para testes
+// Útil caso o desenvolvedor ainda queira disparar eventos diretamente do frontend
+self.addEventListener('message', (event) => {
+  const data = event.data;
+  if (data && data.tipo === 'MOSTRAR_NOTIFICACAO') {
+    console.log('[Service Worker] Recebeu comando local via postMessage.');
+    const options = {
+      body: data.corpo,
+      icon: data.icone,
+      badge: data.icone,
+      tag: 'venda-local',
+      data: { url: '/' }
+    };
+    event.waitUntil(
+      self.registration.showNotification(data.titulo, options)
+    );
+  }
 });
